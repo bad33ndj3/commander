@@ -2,11 +2,15 @@
 
 .PHONY: example
 example:
-	@echo "\n INFO: Starting AC with temperature 18 and fan speed 3:"
+	@echo "Showing general help:"
+	@go run ./example/main.go help
+	@echo "\nShowing help for AC command:"
+	@go run ./example/main.go help ac
+	@echo "\nStarting AC with temperature 18 and fan speed 3:"
 	@go run ./example/main.go ac --temperature 18 --fanspeed 3
-	@echo "\n INFO: Starting engine quietly:"
-	@go run ./example/main.go start --quiet false
-	@echo "\n INFO: Checking status:"
+	@echo "\nStarting engine quietly:"
+	@go run ./example/main.go engine start --quiet
+	@echo "\nChecking status:"
 	@go run ./example/main.go status
 
 example-help:

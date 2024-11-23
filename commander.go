@@ -7,37 +7,175 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"runtime"
-	"strconv"
 	"strings"
 )
 
-// Add new struct tag constants
-const (
-	flagTag     = "flag"
-	defaultTag  = "default"
-	usageTag    = "usage"
+// Common errors
+var (
+	ErrNoSubcommand   = errors.New("no subcommand provided")
+	ErrInvalidHandler = errors.New("handler must be a function accepting context.Context")
+	ErrUnknownCommand = errors.New("unknown command")
 )
 
-// Add color codes
+// Style constants
 const (
-	colorReset  = "\033[0m"
-	colorBold   = "\033[1m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorPurple = "\033[35m"
-	colorCyan   = "\033[36m"
-	colorGray   = "\033[37m"
+	flagTag    = "flag"
+	defaultTag = "default"
+	usageTag   = "usage"
 )
 
+// ANSI color codes
+type colorCode string
+
+const (
+	colorReset  colorCode = "\033[0m"
+	colorBold   colorCode = "\033[1m"
+	colorRed    colorCode = "\033[31m"
+	colorGreen  colorCode = "\033[32m"
+	colorYellow colorCode = "\033[33m"
+	colorBlue   colorCode = "\033[34m"
+	colorPurple colorCode = "\033[35m"
+	colorCyan   colorCode = "\033[36m"
+	colorGray   colorCode = "\033[37m"
+)
+
+// Commander is the main CLI application handler
+type Commander struct {
+	categories map[string]*Category
+}
+
+// Category groups related commands
+type Category struct {
+	Name     string
+	commands map[string]*Command
+}
+
+// Command represents a single CLI command
+type Command struct {
+	Name        string
+	Description string
+	Handler     interface{}
+	flags       *flag.FlagSet
+}
+
+// HandlerFunc is a type constraint for command handlers
+type HandlerFunc interface {
+	~func(context.Context) | ~func(context.Context, any)
+}
+
+func (c *Commander) helpHandler(ctx context.Context, cmdName string) {
+	if cmdName == "" {
+		c.PrintUsage()
+		return
+	}
+
+	cmd, err := c.findCommand(cmdName)
+	if err != nil {
+		fmt.Printf("%s%s%s\n", colorRed, err.Error(), colorReset)
+		c.PrintUsage()
+		return
+	}
+
+	for catName, cat := range c.categories {
+		if _, exists := cat.commands[cmdName]; exists {
+			fmt.Printf("\n%s%sHelp for command '%s%s%s' in category '%s%s%s':%s\n",
+				colorBold, colorCyan,
+				colorGreen, cmdName, colorReset,
+				colorYellow, catName, colorReset,
+				colorReset)
+			fmt.Printf("%s%sDescription:%s %s\n",
+				colorBold, colorPurple, colorReset,
+				cmd.Description)
+			return
+		}
+	}
+}
+
+func (c *Commander) PrintUsage() {
+	fmt.Printf("%s%s🚀 Available Commands:%s\n",
+		colorBold, colorCyan, colorReset)
+
+	for _, cat := range c.categories {
+		fmt.Printf("\n%s📁 %s%s\n",
+			colorYellow, cat.Name, colorReset)
+
+		for name, cmd := range cat.commands {
+			fmt.Printf("  %s%-12s%s %s\n",
+				colorGreen, name,
+				colorReset, cmd.Description)
+		}
+	}
+
+	fmt.Printf("\n%s%s💡 Usage:%s\n",
+		colorBold, colorPurple, colorReset)
+	fmt.Printf("  %scommand [flags]%s\n",
+		colorBlue, colorReset)
+}
+
+func isContextType(t reflect.Type) bool {
+	return t.Implements(reflect.TypeOf((*context.Context)(nil)).Elem())
+}
+
+func (c *Commander) handleStructArgs(cmd *Command, fs *flag.FlagSet, args []reflect.Value) ([]reflect.Value, error) {
+	handlerType := reflect.TypeOf(cmd.Handler)
+	secondArg := handlerType.In(1)
+	argValue := reflect.New(secondArg).Elem()
+
+	// Register flags for struct fields
+	for i := 0; i < secondArg.NumField(); i++ {
+		field := secondArg.Field(i)
+		flagName := strings.ToLower(field.Name)
+		if tag := field.Tag.Get(flagTag); tag != "" {
+			flagName = tag
+		}
+
+		usage := field.Tag.Get(usageTag)
+		defaultValue := field.Tag.Get(defaultTag)
+
+		fieldValue := argValue.Field(i)
+		switch field.Type.Kind() {
+		case reflect.Bool:
+			defaultBool := defaultValue == "true"
+			fs.BoolVar(fieldValue.Addr().Interface().(*bool), flagName, defaultBool, usage)
+		case reflect.Int:
+			var defaultInt int
+			if defaultValue != "" {
+				fmt.Sscanf(defaultValue, "%d", &defaultInt)
+			}
+			fs.IntVar(fieldValue.Addr().Interface().(*int), flagName, defaultInt, usage)
+		case reflect.String:
+			fs.StringVar(fieldValue.Addr().Interface().(*string), flagName, defaultValue, usage)
+		}
+	}
+
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return nil, err
+	}
+
+	args[1] = argValue
+	return args, nil
+}
+
+func (c *Commander) handleStringArg(args []reflect.Value) ([]reflect.Value, error) {
+	var arg string
+	if len(os.Args) > 2 {
+		arg = os.Args[2]
+	}
+	args[1] = reflect.ValueOf(arg)
+	return args, nil
+}
+
+func (c *Commander) callHandler(handler interface{}, args []reflect.Value) error {
+	reflect.ValueOf(handler).Call(args)
+	return nil
+}
+
+// New creates a new Commander instance with built-in help command
 func New() *Commander {
 	cmdr := &Commander{
-		Categories: make(map[string]*Category),
+		categories: make(map[string]*Category),
 	}
 	
-	// Add built-in help category and command
 	helpCat := cmdr.AddCategory("Help")
 	helpCat.Register(&Command{
 		Name:        "help",
@@ -48,395 +186,93 @@ func New() *Commander {
 	return cmdr
 }
 
-type Commander struct {
-	Categories map[string]*Category
-}
-
-// Helper function for colored text
-func colored(color string, text string) string {
-	return color + text + colorReset
-}
-
-// Helper function for bold colored text
-func coloredBold(color string, text string) string {
-	return color + colorBold + text + colorReset
-}
-
-func (c *Commander) helpHandler(ctx context.Context, command string) {
-	if command == "" {
-		c.PrintUsage()
-		return
-	}
-
-	// Search for specific command help
-	for _, category := range c.Categories {
-		if cmd, exists := category.Commands[command]; exists {
-			fmt.Printf("\n%s '%s' %s '%s':\n",
-				coloredBold(colorCyan, "Help for command"),
-				colored(colorGreen, command),
-				colored(colorGray, "in category"),
-				colored(colorYellow, category.Name))
-			fmt.Printf("%s %s\n",
-				coloredBold(colorPurple, "Description:"),
-				colored(colorGray, cmd.Description))
-			
-			if handlerType := reflect.TypeOf(cmd.Handler); handlerType.NumIn() > 1 {
-				fmt.Printf("\n%s\n", coloredBold(colorBlue, "Flags:"))
-				c.printFlagUsage(cmd.Handler)
-			}
-			return
-		}
-	}
-	
-	fmt.Printf("%s: %s\n",
-		colored(colorRed, "Unknown command"),
-		colored(colorYellow, command))
-	c.PrintUsage()
-}
-
-func (c *Commander) registerFlags(fs *flag.FlagSet, handler interface{}) {
-	handlerType := reflect.TypeOf(handler)
-	if handlerType.Kind() != reflect.Func {
-		return
-	}
-
-	for i := 1; i < handlerType.NumIn(); i++ {
-		paramType := handlerType.In(i)
-		paramName := strings.ToLower(paramType.Name())
-		
-		// Skip if parameter name is empty
-		if paramName == "" {
-			paramName = fmt.Sprintf("param%d", i)
-		}
-
-		switch paramType.Kind() {
-		case reflect.Bool:
-			fs.Bool(paramName, false, fmt.Sprintf("Flag for %s", paramName))
-		case reflect.Int:
-			fs.Int(paramName, 0, fmt.Sprintf("Flag for %s", paramName))
-		case reflect.String:
-			fs.String(paramName, "", fmt.Sprintf("Flag for %s", paramName))
-		// Add other types as needed
-		}
-	}
-}
-
-func (c *Commander) printFlagUsage(handler interface{}) {
-	handlerType := reflect.TypeOf(handler)
-	if handlerType.Kind() != reflect.Func || handlerType.NumIn() <= 1 {
-		return
-	}
-
-	argsType := handlerType.In(1)
-	if argsType.Kind() != reflect.Struct {
-		return
-	}
-
-	// Get max flag name length for alignment
-	maxFlagLen := 0
-	for i := 0; i < argsType.NumField(); i++ {
-		field := argsType.Field(i)
-		flagName := field.Tag.Get(flagTag)
-		if flagName == "" {
-			flagName = strings.ToLower(field.Name)
-		}
-		if len(flagName) > maxFlagLen {
-			maxFlagLen = len(flagName)
-		}
-	}
-
-	// Print flags
-	for i := 0; i < argsType.NumField(); i++ {
-		field := argsType.Field(i)
-		
-		flagName := field.Tag.Get(flagTag)
-		if flagName == "" {
-			flagName = strings.ToLower(field.Name)
-		}
-		usage := field.Tag.Get(usageTag)
-		defaultValue := field.Tag.Get(defaultTag)
-
-		var typeHint string
-		switch field.Type.Kind() {
-		case reflect.Bool:
-			typeHint = "bool"
-		case reflect.Int:
-			typeHint = "number"
-		case reflect.String:
-			typeHint = "string"
-		default:
-			typeHint = field.Type.String()
-		}
-
-		// Print flag with aligned columns and colors
-		padding := strings.Repeat(" ", maxFlagLen-len(flagName))
-		fmt.Printf("    %s%s", 
-			colored(colorCyan, "--"+flagName),
-			padding)
-		
-		// Print type hint if not bool
-		if typeHint != "bool" {
-			fmt.Printf(" %s", colored(colorPurple, "<"+typeHint+">"))
-		}
-		
-		// Print usage and default value on same line
-		if defaultValue != "" {
-			fmt.Printf("  %s %s\n",
-				colored(colorGray, usage),
-				colored(colorYellow, "(default: "+defaultValue+")"))
-		} else {
-			fmt.Printf("  %s\n", colored(colorGray, usage))
-		}
-	}
-}
-
-func (c *Commander) PrintUsage() {
-	fmt.Printf("%s\n", coloredBold(colorCyan, "🚀 Available Commands:"))
-	fmt.Println(colored(colorGray, "=================="))
-
-	// Get max command name length for alignment
-	maxNameLen := 0
-	for _, category := range c.Categories {
-		for name := range category.Commands {
-			if len(name) > maxNameLen {
-				maxNameLen = len(name)
-			}
-		}
-	}
-
-	// Print each category and its commands
-	for _, category := range c.Categories {
-		fmt.Printf("%s %s\n", colored(colorYellow, "📁"), coloredBold(colorYellow, category.Name))
-		
-		for name, cmd := range category.Commands {
-			// Print command name and description aligned
-			padding := strings.Repeat(" ", maxNameLen-len(name))
-			fmt.Printf("  %s%s  %s\n", 
-				colored(colorGreen, name),
-				padding,
-				colored(colorGray, cmd.Description))
-			
-			// Print flags if the command has any
-			if handlerType := reflect.TypeOf(cmd.Handler); handlerType.NumIn() > 1 {
-				c.printFlagUsage(cmd.Handler)
-			}
-		}
-		fmt.Println() // Single line between categories
-	}
-
-	fmt.Printf("%s\n", coloredBold(colorPurple, "💡 Usage:"))
-	fmt.Printf("  %s\n", colored(colorBlue, "command [flags]"))
-	fmt.Printf("  %s  %s\n", 
-		colored(colorBlue, "help <command>"),
-		colored(colorGray, "Show help for command"))
-}
-
+// AddCategory creates a new command category
 func (c *Commander) AddCategory(name string) *Category {
-	category := &Category{
+	cat := &Category{
 		Name:     name,
-		
-		Commands: make(map[string]*Command),
+		commands: make(map[string]*Command),
 	}
-	c.Categories[name] = category
-	return category
+	c.categories[name] = cat
+	return cat
 }
 
-type Category struct {
-	Name     string
-	Commands map[string]*Command
-}
-
+// Register adds a command to a category
 func (cat *Category) Register(cmd *Command) {
-	if cat.Commands == nil {
-		cat.Commands = make(map[string]*Command)
+	if cat.commands == nil {
+		cat.commands = make(map[string]*Command)
 	}
-	cat.Commands[cmd.Name] = cmd
+	cat.commands[cmd.Name] = cmd
 }
 
-type Command struct {
-	Name        string
-	Description string
-	Handler     interface{}
-	Flags       *flag.FlagSet
-}
-
+// Run executes the CLI application
 func (c *Commander) Run() error {
 	if len(os.Args) < 2 {
 		c.PrintUsage()
-		return errors.New("no subcommand provided")
+		return ErrNoSubcommand
 	}
 
-	subcommandName := os.Args[1]
-	var cmd *Command
-	var found bool
-
-	// Search for the command in all categories
-	for _, category := range c.Categories {
-		if category.Commands[subcommandName] != nil {
-			cmd = category.Commands[subcommandName]
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	cmd, err := c.findCommand(os.Args[1])
+	if err != nil {
 		c.PrintUsage()
-		return fmt.Errorf("unknown subcommand: %s", subcommandName)
+		return err
 	}
 
-	// Create a new FlagSet for this command
-	fs := flag.NewFlagSet(cmd.Name, flag.ExitOnError)
-	cmd.Flags = fs
+	return c.executeCommand(cmd)
+}
 
+// findCommand locates a command by name across all categories
+func (c *Commander) findCommand(name string) (*Command, error) {
+	for _, cat := range c.categories {
+		if cmd, exists := cat.commands[name]; exists {
+			return cmd, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", ErrUnknownCommand, name)
+}
+
+// executeCommand runs a single command with its arguments
+func (c *Commander) executeCommand(cmd *Command) error {
 	handlerType := reflect.TypeOf(cmd.Handler)
-	if handlerType.Kind() != reflect.Func {
-		return errors.New("handler is not a function")
+	if !isValidHandler(handlerType) {
+		return ErrInvalidHandler
 	}
 
-	if handlerType.NumIn() < 1 {
-		return errors.New("handler function must accept at least one argument (context.Context)")
+	fs := flag.NewFlagSet(cmd.Name, flag.ExitOnError)
+	cmd.flags = fs
+
+	args, err := c.prepareArgs(cmd, fs)
+	if err != nil {
+		return err
 	}
 
-	// Check that the first parameter is context.Context
-	if !isContextType(handlerType.In(0)) {
-		return errors.New("first parameter must be context.Context")
-	}
+	return c.callHandler(cmd.Handler, args)
+}
 
-	// Prepare argument values
-	argValues := make([]reflect.Value, handlerType.NumIn())
-	ctx := context.Background()
-	argValues[0] = reflect.ValueOf(ctx)
+// isValidHandler checks if a function matches the HandlerFunc constraint
+func isValidHandler(t reflect.Type) bool {
+	return t.Kind() == reflect.Func &&
+		t.NumIn() >= 1 &&
+		isContextType(t.In(0))
+}
 
-	// Handle arguments based on the second parameter type
+// prepareArgs sets up command arguments and parses flags
+func (c *Commander) prepareArgs(cmd *Command, fs *flag.FlagSet) ([]reflect.Value, error) {
+	handlerType := reflect.TypeOf(cmd.Handler)
+	args := make([]reflect.Value, handlerType.NumIn())
+	args[0] = reflect.ValueOf(context.Background())
+
 	if handlerType.NumIn() > 1 {
-		secondParamType := handlerType.In(1)
-		
-		switch secondParamType.Kind() {
+		secondArg := handlerType.In(1)
+		switch secondArg.Kind() {
 		case reflect.Struct:
-			// Handle struct arguments
-			argsValue := reflect.New(secondParamType)
-			c.registerStructFlags(fs, argsValue.Elem())
-			
-			if err := fs.Parse(os.Args[2:]); err != nil {
-				return err
-			}
-			
-			argValues[1] = argsValue.Elem()
-			
+			return c.handleStructArgs(cmd, fs, args)
 		case reflect.String:
-			// Handle string argument (for help command)
-			helpArg := ""
-			if len(os.Args) > 2 {
-				helpArg = os.Args[2]
-			}
-			argValues[1] = reflect.ValueOf(helpArg)
-			
+			return c.handleStringArg(args)
 		default:
-			return fmt.Errorf("unsupported parameter type: %v", secondParamType)
+			return nil, fmt.Errorf("unsupported argument type: %v", secondArg)
 		}
 	}
 
-	// Call the handler
-	reflect.ValueOf(cmd.Handler).Call(argValues)
-	return nil
+	return args, nil
 }
 
-func (c *Commander) registerStructFlags(fs *flag.FlagSet, structValue reflect.Value) {
-	structType := structValue.Type()
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
-		fieldValue := structValue.Field(i)
-		
-		// Get flag name from tag or use field name
-		flagName := field.Tag.Get(flagTag)
-		if flagName == "" {
-			flagName = strings.ToLower(field.Name)
-		}
-
-		// Get usage from tag
-		usage := field.Tag.Get(usageTag)
-		if usage == "" {
-			usage = fmt.Sprintf("Flag for %s", field.Name)
-		}
-
-		// Get default value from tag
-		defaultValue := field.Tag.Get(defaultTag)
-
-		switch field.Type.Kind() {
-		case reflect.Bool:
-			defaultBool := false
-			if defaultValue != "" {
-				defaultBool = defaultValue == "true"
-			}
-			fs.BoolVar(fieldValue.Addr().Interface().(*bool), flagName, defaultBool, usage)
-
-		case reflect.Int:
-			defaultInt := 0
-			if defaultValue != "" {
-				if parsed, err := strconv.Atoi(defaultValue); err == nil {
-					defaultInt = parsed
-				}
-			}
-			fs.IntVar(fieldValue.Addr().Interface().(*int), flagName, defaultInt, usage)
-
-		case reflect.String:
-			fs.StringVar(fieldValue.Addr().Interface().(*string), flagName, defaultValue, usage)
-
-		// Add other types as needed
-		}
-	}
-}
-
-// Helper functions
-func isContextType(t reflect.Type) bool {
-	return t.Implements(reflect.TypeOf((*context.Context)(nil)).Elem())
-}
-
-func isZeroValue(v reflect.Value) bool {
-	switch v.Kind() {
-	case reflect.Bool:
-		return !v.Bool()
-	case reflect.Int, reflect.Int64:
-		return v.Int() == 0
-	case reflect.Uint, reflect.Uint64:
-		return v.Uint() == 0
-	case reflect.Float64:
-		return v.Float() == 0.0
-	case reflect.String:
-		return v.String() == ""
-	default:
-		return false
-	}
-}
-
-// Helper function to extract parameter names from function name
-func getFunctionParamNames(handler interface{}) []string {
-	// Get function pointer
-	ptr := reflect.ValueOf(handler).Pointer()
-	fn := runtime.FuncForPC(ptr)
-	if fn == nil {
-		return nil
-	}
-
-	// Get the function type
-	handlerType := reflect.TypeOf(handler)
-	if handlerType.Kind() != reflect.Func {
-		return nil
-	}
-
-	// Skip the context parameter (index 0) and collect remaining parameter names
-	paramNames := make([]string, 0, handlerType.NumIn()-1)
-	for i := 1; i < handlerType.NumIn(); i++ {
-		paramType := handlerType.In(i)
-		paramName := strings.ToLower(paramType.Name()) // This will be empty for built-in types
-
-		// If it's a built-in type, get the parameter name from the type
-		if paramName == "" {
-			paramName = strings.ToLower(paramType.String())
-		}
-
-		paramNames = append(paramNames, paramName)
-	}
-
-	return paramNames
-}
