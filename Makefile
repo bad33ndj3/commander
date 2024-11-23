@@ -1,6 +1,7 @@
 # Ironically use a Makefile for a Makefile replacement :)
 
-.PHONY: example
+.PHONY: example example-help example-ac-help test lint
+
 example:
 	@echo "\nStarting AC with temperature 18 and fan speed 3:"
 	@go run ./example/main.go ac --temperature 18 --fanspeed 3
@@ -14,3 +15,13 @@ example-help:
 
 example-ac-help:
 	@go run ./example/main.go help ac
+
+test:
+	@go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+	@go tool cover -func=coverage.txt
+
+lint:
+	@golangci-lint run ./...
+
+# Run all checks
+check: lint test
