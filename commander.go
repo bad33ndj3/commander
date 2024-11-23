@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -42,6 +43,8 @@ const (
 // Commander is the main CLI application handler
 type Commander struct {
 	categories map[string]*Category
+	args       []string
+	output     io.Writer
 }
 
 // Category groups related commands
@@ -63,6 +66,10 @@ type HandlerFunc interface {
 	~func(context.Context) | ~func(context.Context, any)
 }
 
+func (c *Commander) printf(format string, a ...any) {
+	fmt.Fprintf(c.output, format, a...)
+}
+
 func (c *Commander) helpHandler(ctx context.Context, cmdName string) {
 	if cmdName == "" {
 		c.PrintUsage()
@@ -71,19 +78,19 @@ func (c *Commander) helpHandler(ctx context.Context, cmdName string) {
 
 	cmd, err := c.findCommand(cmdName)
 	if err != nil {
-		fmt.Printf("%s%s%s\n", colorRed, err.Error(), colorReset)
+		c.printf("%s%s%s\n", colorRed, err.Error(), colorReset)
 		c.PrintUsage()
 		return
 	}
 
 	for catName, cat := range c.categories {
 		if _, exists := cat.commands[cmdName]; exists {
-			fmt.Printf("\n%s%sHelp for command '%s%s%s' in category '%s%s%s':%s\n",
+			c.printf("\n%s%sHelp for command '%s%s%s' in category '%s%s%s':%s\n",
 				colorBold, colorCyan,
 				colorGreen, cmdName, colorReset,
 				colorYellow, catName, colorReset,
 				colorReset)
-			fmt.Printf("%s%sDescription:%s %s\n",
+			c.printf("%s%sDescription:%s %s\n",
 				colorBold, colorPurple, colorReset,
 				cmd.Description)
 			return
@@ -92,23 +99,60 @@ func (c *Commander) helpHandler(ctx context.Context, cmdName string) {
 }
 
 func (c *Commander) PrintUsage() {
-	fmt.Printf("%s%s🚀 Available Commands:%s\n",
+	c.printf("%s%s🚀 Available Commands:%s\n",
 		colorBold, colorCyan, colorReset)
 
 	for _, cat := range c.categories {
-		fmt.Printf("\n%s📁 %s%s\n",
+		c.printf("\n%s📁 %s%s\n",
 			colorYellow, cat.Name, colorReset)
 
 		for name, cmd := range cat.commands {
-			fmt.Printf("  %s%-12s%s %s\n",
+			// Print command name and description
+			c.printf("  %s%-12s%s %s\n",
 				colorGreen, name,
 				colorReset, cmd.Description)
+
+			// Show flags if command has a struct argument
+			handlerType := reflect.TypeOf(cmd.Handler)
+			if handlerType.NumIn() > 1 {
+				secondArg := handlerType.In(1)
+				if secondArg.Kind() == reflect.Struct {
+					// Print flags for each struct field
+					for i := 0; i < secondArg.NumField(); i++ {
+						field := secondArg.Field(i)
+						flagName := field.Tag.Get(flagTag)
+						if flagName == "" {
+							flagName = strings.ToLower(field.Name)
+						}
+						usage := field.Tag.Get(usageTag)
+						defaultValue := field.Tag.Get(defaultTag)
+
+						// Format flag help
+						c.printf("    %s--%s%s", 
+							colorCyan, flagName, colorReset)
+						
+						if field.Type.Kind() != reflect.Bool {
+							c.printf(" <%s>", field.Type.String())
+						}
+						
+						if usage != "" {
+							c.printf("  %s", usage)
+						}
+						
+						if defaultValue != "" {
+							c.printf(" %s(default: %s)%s", 
+								colorYellow, defaultValue, colorReset)
+						}
+						c.printf("\n")
+					}
+				}
+			}
 		}
 	}
 
-	fmt.Printf("\n%s%s💡 Usage:%s\n",
+	c.printf("\n%s%s💡 Usage:%s\n",
 		colorBold, colorPurple, colorReset)
-	fmt.Printf("  %scommand [flags]%s\n",
+	c.printf("  %scommand [flags]%s\n",
 		colorBlue, colorReset)
 }
 
@@ -148,7 +192,7 @@ func (c *Commander) handleStructArgs(cmd *Command, fs *flag.FlagSet, args []refl
 		}
 	}
 
-	if err := fs.Parse(os.Args[2:]); err != nil {
+	if err := fs.Parse(c.args[2:]); err != nil {
 		return nil, err
 	}
 
@@ -158,8 +202,8 @@ func (c *Commander) handleStructArgs(cmd *Command, fs *flag.FlagSet, args []refl
 
 func (c *Commander) handleStringArg(args []reflect.Value) ([]reflect.Value, error) {
 	var arg string
-	if len(os.Args) > 2 {
-		arg = os.Args[2]
+	if len(c.args) > 2 {
+		arg = c.args[2]
 	}
 	args[1] = reflect.ValueOf(arg)
 	return args, nil
@@ -172,17 +216,24 @@ func (c *Commander) callHandler(handler interface{}, args []reflect.Value) error
 
 // New creates a new Commander instance with built-in help command
 func New() *Commander {
+	return NewWithArgs(os.Args)
+}
+
+// NewWithArgs creates a new Commander instance with custom arguments
+func NewWithArgs(args []string) *Commander {
 	cmdr := &Commander{
 		categories: make(map[string]*Category),
+		args:       args,
+		output:     os.Stdout,
 	}
-	
+
 	helpCat := cmdr.AddCategory("Help")
 	helpCat.Register(&Command{
 		Name:        "help",
 		Description: "Show help information for commands",
 		Handler:     cmdr.helpHandler,
 	})
-	
+
 	return cmdr
 }
 
@@ -206,12 +257,12 @@ func (cat *Category) Register(cmd *Command) {
 
 // Run executes the CLI application
 func (c *Commander) Run() error {
-	if len(os.Args) < 2 {
+	if len(c.args) < 2 {
 		c.PrintUsage()
 		return ErrNoSubcommand
 	}
 
-	cmd, err := c.findCommand(os.Args[1])
+	cmd, err := c.findCommand(c.args[1])
 	if err != nil {
 		c.PrintUsage()
 		return err
@@ -275,4 +326,3 @@ func (c *Commander) prepareArgs(cmd *Command, fs *flag.FlagSet) ([]reflect.Value
 
 	return args, nil
 }
-
