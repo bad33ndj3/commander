@@ -42,8 +42,8 @@ func TestCommanderBasics(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmdr := NewWithArgs(tt.args)
-			var output strings.Builder
-			cmdr.output = &output
+			var builder strings.Builder
+			cmdr.SetOutput(&builder)
 			err := cmdr.Run()
 
 			if (err != nil) != (tt.wantErr != nil) {
@@ -122,8 +122,8 @@ func TestStructArguments(t *testing.T) {
 func TestHelpOutput(t *testing.T) {
 	cmdr := NewWithArgs([]string{"prog", "help"})
 	// Capture output
-	var output strings.Builder
-	cmdr.output = &output
+	var builder strings.Builder
+	cmdr.SetOutput(&builder)
 
 	cat := cmdr.AddCategory("Test")
 	cat.Register(&Command{
@@ -149,8 +149,8 @@ func TestHelpOutput(t *testing.T) {
 	}
 
 	for _, exp := range expected {
-		if !strings.Contains(output.String(), exp) {
-			t.Logf("Got output:\n%s", output.String())
+		if !strings.Contains(builder.String(), exp) {
+			t.Logf("Got output:\n%s", builder.String())
 			t.Errorf("Help output missing: %s", exp)
 		}
 	}
