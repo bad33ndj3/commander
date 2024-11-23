@@ -40,20 +40,23 @@ const (
 	colorGray   colorCode = "\033[37m"
 )
 
-// Commander is the main CLI application handler
+// Commander is the main CLI application handler.
+// It manages categories of commands and provides help functionality.
 type Commander struct {
 	categories map[string]*Category
 	args       []string
 	output     io.Writer
 }
 
-// Category groups related commands
+// Category groups related commands under a common theme or functionality.
+// For example, "Network" category might contain commands like "ping" and "curl".
 type Category struct {
 	Name     string
 	commands map[string]*Command
 }
 
-// Command represents a single CLI command
+// Command represents a single CLI command with its handler and metadata.
+// Each command belongs to a Category and can accept structured arguments.
 type Command struct {
 	Name        string
 	Description string
@@ -61,7 +64,9 @@ type Command struct {
 	flags       *flag.FlagSet
 }
 
-// HandlerFunc is a type constraint for command handlers
+// HandlerFunc defines the type constraint for valid command handlers.
+// Handlers must accept a context.Context as their first parameter and
+// optionally a struct for arguments.
 type HandlerFunc interface {
 	~func(context.Context) | ~func(context.Context, any)
 }
@@ -128,19 +133,19 @@ func (c *Commander) PrintUsage() {
 						defaultValue := field.Tag.Get(defaultTag)
 
 						// Format flag help
-						c.printf("    %s--%s%s", 
+						c.printf("    %s--%s%s",
 							colorCyan, flagName, colorReset)
-						
+
 						if field.Type.Kind() != reflect.Bool {
 							c.printf(" <%s>", field.Type.String())
 						}
-						
+
 						if usage != "" {
 							c.printf("  %s", usage)
 						}
-						
+
 						if defaultValue != "" {
-							c.printf(" %s(default: %s)%s", 
+							c.printf(" %s(default: %s)%s",
 								colorYellow, defaultValue, colorReset)
 						}
 						c.printf("\n")
@@ -214,12 +219,14 @@ func (c *Commander) callHandler(handler interface{}, args []reflect.Value) error
 	return nil
 }
 
-// New creates a new Commander instance with built-in help command
+// New creates a new Commander instance with built-in help command.
+// It uses os.Args for command-line arguments and os.Stdout for output.
 func New() *Commander {
 	return NewWithArgs(os.Args)
 }
 
-// NewWithArgs creates a new Commander instance with custom arguments
+// NewWithArgs creates a new Commander instance with custom arguments.
+// This is useful for testing or when you want to parse arguments from a different source.
 func NewWithArgs(args []string) *Commander {
 	cmdr := &Commander{
 		categories: make(map[string]*Category),
@@ -237,7 +244,9 @@ func NewWithArgs(args []string) *Commander {
 	return cmdr
 }
 
-// AddCategory creates a new command category
+// AddCategory creates a new command category with the given name.
+// Categories help organize commands into logical groups.
+// Returns a pointer to the new Category for method chaining.
 func (c *Commander) AddCategory(name string) *Category {
 	cat := &Category{
 		Name:     name,
@@ -247,7 +256,8 @@ func (c *Commander) AddCategory(name string) *Category {
 	return cat
 }
 
-// Register adds a command to a category
+// Register adds a command to a category.
+// The command handler must follow the HandlerFunc interface constraints.
 func (cat *Category) Register(cmd *Command) {
 	if cat.commands == nil {
 		cat.commands = make(map[string]*Command)
@@ -255,7 +265,12 @@ func (cat *Category) Register(cmd *Command) {
 	cat.commands[cmd.Name] = cmd
 }
 
-// Run executes the CLI application
+// Run executes the CLI application by parsing arguments and running the appropriate command.
+// Returns an error if:
+// - No subcommand is provided
+// - The subcommand is unknown
+// - The command handler is invalid
+// - Flag parsing fails
 func (c *Commander) Run() error {
 	if len(c.args) < 2 {
 		c.PrintUsage()
@@ -325,4 +340,10 @@ func (c *Commander) prepareArgs(cmd *Command, fs *flag.FlagSet) ([]reflect.Value
 	}
 
 	return args, nil
+}
+
+// SetOutput sets the writer where the commander will write its output.
+// This is useful for testing or redirecting output to a different destination.
+func (c *Commander) SetOutput(w io.Writer) {
+	c.output = w
 }
