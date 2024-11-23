@@ -1,3 +1,97 @@
+// Package commander provides a simple CLI framework for building command-line applications
+// with support for categories, commands, and structured arguments. It is designed as a
+// type-safe alternative to Make/Mage for Go projects.
+//
+// Example usage:
+//
+//	package main
+//
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "os"
+//	    "github.com/bad33ndj3/commander"
+//	)
+//
+//	// Define command arguments using structs with flag tags
+//	type BuildArgs struct {
+//	    Debug   bool   `flag:"debug" default:"false" usage:"Enable debug mode"`
+//	    OutDir  string `flag:"out" default:"./bin" usage:"Output directory"`
+//	    Version string `flag:"version" default:"dev" usage:"Build version"`
+//	}
+//
+//	type TestArgs struct {
+//	    Verbose bool   `flag:"verbose" default:"false" usage:"Enable verbose output"`
+//	    Pattern string `flag:"pattern" default:"./..." usage:"Test pattern to run"`
+//	}
+//
+//	func main() {
+//	    cmdr := commander.New()
+//
+//	    // Create categories for command organization
+//	    buildCat := cmdr.AddCategory("Build")
+//	    testCat := cmdr.AddCategory("Test")
+//
+//	    // Register build commands
+//	    buildCat.Register(&commander.Command{
+//	        Name:        "build",
+//	        Description: "Build the project",
+//	        Handler:     buildHandler,
+//	    })
+//
+//	    // Register test commands
+//	    testCat.Register(&commander.Command{
+//	        Name:        "test",
+//	        Description: "Run tests",
+//	        Handler:     testHandler,
+//	    })
+//
+//	    if err := cmdr.Run(); err != nil {
+//	        fmt.Fprintln(os.Stderr, err)
+//	        os.Exit(1)
+//	    }
+//	}
+//
+//	func buildHandler(ctx context.Context, args BuildArgs) {
+//	    if args.Debug {
+//	        fmt.Println("Debug mode enabled")
+//	    }
+//	    fmt.Printf("Building version %s in %s\n", args.Version, args.OutDir)
+//	}
+//
+//	func testHandler(ctx context.Context, args TestArgs) {
+//	    if args.Verbose {
+//	        fmt.Println("Verbose mode enabled")
+//	    }
+//	    fmt.Printf("Running tests: %s\n", args.Pattern)
+//	}
+//
+// This will create a CLI that can be used like:
+//
+//	$ myapp build --debug --out ./dist --version v1.0.0
+//	$ myapp test --verbose --pattern ./pkg/...
+//	$ myapp help
+//	$ myapp help build
+//
+// Key Features:
+//   - Type-safe command arguments using structs
+//   - Automatic flag parsing and validation
+//   - Built-in help system with colorized output
+//   - Command organization using categories
+//   - IDE support with Go's type system
+//
+// Command Handler Rules:
+//  1. Must accept context.Context as first parameter
+//  2. May accept a struct as second parameter for flags
+//  3. Struct fields become CLI flags automatically
+//  4. Supported field types: bool, int, string
+//
+// Struct Tag Options:
+//   - flag:"name"    - Custom flag name (default: lowercase field name)
+//   - default:"val"  - Default value for the flag
+//   - usage:"text"   - Help text shown in documentation
+//
+// For more examples, see the example directory in the repository.
 package commander
 
 import (
