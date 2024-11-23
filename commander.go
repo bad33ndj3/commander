@@ -72,7 +72,7 @@ type HandlerFunc interface {
 }
 
 func (c *Commander) printf(format string, a ...any) {
-	fmt.Fprintf(c.output, format, a...)
+	_, _ = fmt.Fprintf(c.output, format, a...)
 }
 
 func (c *Commander) helpHandler(ctx context.Context, cmdName string) {
@@ -103,6 +103,9 @@ func (c *Commander) helpHandler(ctx context.Context, cmdName string) {
 	}
 }
 
+// PrintUsage displays the help information for all commands,
+// including their descriptions and available flags.
+// The output is formatted with colors and proper indentation.
 func (c *Commander) PrintUsage() {
 	c.printf("%s%s🚀 Available Commands:%s\n",
 		colorBold, colorCyan, colorReset)
@@ -189,7 +192,7 @@ func (c *Commander) handleStructArgs(cmd *Command, fs *flag.FlagSet, args []refl
 		case reflect.Int:
 			var defaultInt int
 			if defaultValue != "" {
-				fmt.Sscanf(defaultValue, "%d", &defaultInt)
+				_, _ = fmt.Sscanf(defaultValue, "%d", &defaultInt)
 			}
 			fs.IntVar(fieldValue.Addr().Interface().(*int), flagName, defaultInt, usage)
 		case reflect.String:

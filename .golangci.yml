@@ -24,10 +24,10 @@ linters-settings:
 run:
   deadline: 5m
   tests: true
-  skip-dirs:
-    - example/
 
 issues:
   exclude-use-default: false
   max-per-linter: 0
   max-same-issues: 0 
+  exclude-dirs:
+    - example/
