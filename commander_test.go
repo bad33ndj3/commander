@@ -41,7 +41,7 @@ func TestCommanderBasics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmdr := NewWithArgs(tt.args)
+			cmdr := newWithArgs(tt.args)
 			var builder strings.Builder
 			cmdr.SetOutput(&builder)
 			err := cmdr.Run()
@@ -96,7 +96,7 @@ func TestStructArguments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmdr := NewWithArgs(tt.args)
+			cmdr := newWithArgs(tt.args)
 			var output strings.Builder
 			cmdr.output = &output
 			cat := cmdr.AddCategory("Test")
@@ -120,7 +120,7 @@ func TestStructArguments(t *testing.T) {
 }
 
 func TestHelpOutput(t *testing.T) {
-	cmdr := NewWithArgs([]string{"prog", "help"})
+	cmdr := newWithArgs([]string{"prog", "help"})
 	// Capture output
 	var builder strings.Builder
 	cmdr.SetOutput(&builder)

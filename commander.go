@@ -319,12 +319,12 @@ func (c *Commander) callHandler(handler interface{}, args []reflect.Value) error
 // New creates a new Commander instance with built-in help command.
 // It uses os.Args for command-line arguments and os.Stdout for output.
 func New() *Commander {
-	return NewWithArgs(os.Args)
+	return newWithArgs(os.Args)
 }
 
-// NewWithArgs creates a new Commander instance with custom arguments.
+// newWithArgs creates a new Commander instance with custom arguments.
 // This is useful for testing or when you want to parse arguments from a different source.
-func NewWithArgs(args []string) *Commander {
+func newWithArgs(args []string) *Commander {
 	cmdr := &Commander{
 		categories: make(map[string]*Category),
 		args:       args,
